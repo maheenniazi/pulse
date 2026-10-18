@@ -1,0 +1,19 @@
+# Build output
+build/
+build-*/
+cmake-build-*/
+
+# Backtest artifacts
+results.csv
+*.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+compile_commands.json

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+jobs:
+  # Build with both GCC and Clang, run the test suite, the demo, and a short
+  # backtest smoke test. Matching-engine code has to be correct on every
+  # toolchain, so we don't trust a single compiler.
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler:
+          - { cc: gcc,   cxx: g++ }
+          - { cc: clang, cxx: clang++ }
+    env:
+      CC: ${{ matrix.compiler.cc }}
+      CXX: ${{ matrix.compiler.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build -j
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Smoke-test demo + backtest
+        run: |
+          ./build/pulse_demo
+          ./build/pulse_backtest 50000 7 /tmp/results.csv
+
+  # Run the suite under the sanitizers. ThreadSanitizer proves the lock-free
+  # SPSC queue has no data races; Address/UndefinedBehavior catch memory and
+  # UB bugs the optimizer would otherwise hide.
+  sanitizers:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        san: [ "address,undefined", "thread" ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure (${{ matrix.san }})
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULSE_SANITIZE=${{ matrix.san }}
+      - name: Build
+        run: cmake --build build -j --target pulse_tests
+      - name: Run sanitized tests
+        run: ./build/pulse_tests

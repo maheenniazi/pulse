@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pulse Order Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+  /* Layout: a two-column trading console — book ladder on the left, controls
+     and tape on the right — that stacks to one column on phones. */
+  :root {
+    --bg:        #f4f5f7;
+    --surface:   #ffffff;
+    --surface-2: #eef0f3;
+    --line:      #d9dde3;
+    --fg:        #141922;
+    --muted:     #5c6673;
+    --accent:    #3a5bd9;   /* UI chrome / focus */
+    --buy:       #0f8a5f;   /* semantic green */
+    --buy-bar:   rgba(15,138,95,0.16);
+    --sell:      #d23b4e;   /* semantic red */
+    --sell-bar:  rgba(210,59,78,0.16);
+    --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #0c0f14;
+      --surface:   #141a22;
+      --surface-2: #1b222c;
+      --line:      #272f3a;
+      --fg:        #e6eaf0;
+      --muted:     #8b97a6;
+      --accent:    #6f8bff;
+      --buy:       #2dd48a;
+      --buy-bar:   rgba(45,212,138,0.14);
+      --sell:      #ff6b7e;
+      --sell-bar:  rgba(255,107,126,0.14);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #0c0f14;
+    --surface:   #141a22;
+    --surface-2: #1b222c;
+    --line:      #272f3a;
+    --fg:        #e6eaf0;
+    --muted:     #8b97a6;
+    --accent:    #6f8bff;
+    --buy:       #2dd48a;
+    --buy-bar:   rgba(45,212,138,0.14);
+    --sell:      #ff6b7e;
+    --sell-bar:  rgba(255,107,126,0.14);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    line-height: 1.45;
+    padding: 0 max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding-block: 22px 40px; }
+
+  header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; }
+  .brand { font-weight: 700; font-size: 1.5rem; letter-spacing: -0.02em; }
+  .brand .dot { color: var(--accent); }
+  .tag { color: var(--muted); font-size: 0.86rem; }
+  .chip {
+    margin-left: auto; font-family: var(--font-mono); font-size: 0.72rem;
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); color: var(--muted); white-space: nowrap;
+  }
+  .chip .live { width: 7px; height: 7px; border-radius: 50%; background: var(--buy); }
+
+  .stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px;
+           background: var(--line); border: 1px solid var(--line);
+           border-radius: 12px; overflow: hidden; margin: 18px 0; }
+  .stat { background: var(--surface); padding: 11px 12px; min-width: 0; }
+  .stat .k { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .stat .v { font-family: var(--font-mono); font-size: 1.12rem; font-weight: 600;
+             font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+  .grid { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 16px; align-items: start; }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .panel h2 { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.07em;
+              color: var(--muted); margin: 0; padding: 12px 14px 8px; }
+
+  /* ---- order book ladder ---- */
+  .ladder { padding: 0 8px 10px; }
+  .row { position: relative; display: grid; grid-template-columns: 1fr 1fr 48px;
+         align-items: center; padding: 3px 8px; font-family: var(--font-mono);
+         font-size: 0.86rem; font-variant-numeric: tabular-nums; border-radius: 5px; }
+  .row .bar { position: absolute; top: 2px; bottom: 2px; right: 0; border-radius: 5px; z-index: 0; }
+  .row > span { position: relative; z-index: 1; }
+  .row .px { font-weight: 600; }
+  .row .qty { text-align: right; color: var(--fg); }
+  .row .cnt { text-align: right; color: var(--muted); font-size: 0.74rem; }
+  .ask .px { color: var(--sell); } .ask .bar { background: var(--sell-bar); }
+  .bid .px { color: var(--buy); }  .bid .bar { background: var(--buy-bar); }
+  .spreadrow { display: flex; justify-content: space-between; align-items: center;
+               padding: 7px 16px; margin: 4px 8px; border-radius: 6px;
+               background: var(--surface-2); font-family: var(--font-mono);
+               font-size: 0.8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .colhead { display: grid; grid-template-columns: 1fr 1fr 48px; padding: 2px 16px 6px;
+             font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+  .colhead span:nth-child(2){ text-align: right; } .colhead span:nth-child(3){ text-align: right; }
+
+  /* ---- controls ---- */
+  .controls { padding: 12px 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .seg button { font-family: var(--font-sans); font-weight: 600; font-size: 0.9rem;
+                padding: 9px; border-radius: 8px; border: 1px solid var(--line);
+                background: var(--surface-2); color: var(--muted); cursor: pointer; }
+  .seg button[aria-pressed="true"].buyb  { background: var(--buy);  color: #fff; border-color: var(--buy); }
+  .seg button[aria-pressed="true"].sellb { background: var(--sell); color: #fff; border-color: var(--sell); }
+  .seg button[aria-pressed="true"].typ   { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .field input { font-family: var(--font-mono); font-size: 0.95rem; padding: 9px 10px;
+                 border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); }
+  .field input:disabled { opacity: 0.45; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .send { font-family: var(--font-sans); font-weight: 700; font-size: 0.98rem; padding: 11px;
+          border: none; border-radius: 8px; color: #fff; background: var(--buy); cursor: pointer; }
+  .send.sell { background: var(--sell); }
+  .minor { display: flex; flex-wrap: wrap; gap: 8px; }
+  .minor button { flex: 1 1 auto; font-family: var(--font-sans); font-size: 0.82rem; font-weight: 500;
+                  padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+                  background: var(--surface-2); color: var(--fg); cursor: pointer; white-space: nowrap; }
+  .minor button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- your orders + tape ---- */
+  .list { padding: 6px 10px 12px; display: flex; flex-direction: column; gap: 5px;
+          max-height: 190px; overflow-y: auto; }
+  .myorder { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center;
+             font-family: var(--font-mono); font-size: 0.82rem; padding: 6px 8px;
+             border: 1px solid var(--line); border-radius: 7px; font-variant-numeric: tabular-nums; }
+  .myorder .lbl { font-weight: 600; } .myorder .lbl.b { color: var(--buy); } .myorder .lbl.s { color: var(--sell); }
+  .myorder button { font-family: var(--font-sans); font-size: 0.72rem; padding: 3px 9px;
+                    border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2);
+                    color: var(--muted); cursor: pointer; }
+  .empty { color: var(--muted); font-size: 0.82rem; padding: 4px 10px 12px; }
+  .tape .list { max-height: 230px; }
+  .trade { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; font-family: var(--font-mono);
+           font-size: 0.82rem; padding: 3px 8px; font-variant-numeric: tabular-nums; }
+  .trade .side { font-weight: 600; } .trade .side.b { color: var(--buy); } .trade .side.s { color: var(--sell); }
+  .trade .amt { color: var(--muted); text-align: right; }
+
+  footer { margin-top: 26px; color: var(--muted); font-size: 0.8rem; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+  .loading { padding: 40px; text-align: center; color: var(--muted); font-family: var(--font-mono); }
+
+  @media (max-width: 760px) {
+    .grid { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .stats .stat:nth-child(4){ border-top: 1px solid var(--line); }
+    .stats .stat:nth-child(5){ border-top: 1px solid var(--line); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .row .bar { transition: width 0.18s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">Pulse<span class="dot">.</span></div>
+    <div class="tag">A live limit order book — matching buyers &amp; sellers by price-time priority</div>
+    <div class="chip"><span class="live"></span> real C++ engine · WebAssembly</div>
+  </header>
+
+  <div id="app" class="loading">Loading the matching engine…</div>
+
+  <footer>
+    Prices shown in dollars; the engine matches in integer ticks (1¢) under the hood.
+    Source &amp; benchmarks: <a href="https://github.com/maheenniazi/pulse" target="_blank" rel="noopener">github.com/maheenniazi/pulse</a>
+  </footer>
+</div>
+
+<script src="pulse_engine.js"></script>
+<script>
+(function () {
+  "use strict";
+  const $ = (sel, root) => (root || document).querySelector(sel);
+
+  // ---- demo state ----------------------------------------------------------
+  let engine = null;
+  let side = 0;         // 0 buy, 1 sell
+  let otype = 0;        // 0 limit, 1 market
+  let autoTimer = null;
+  const myOrders = [];  // {id, side, type, price, qty}  (orders I placed by hand)
+  const DEPTH = 10;
+
+  const toDollars = (ticks) => "$" + (ticks / 100).toFixed(2);
+
+  function appHtml() {
+    return `
+    <div class="stats">
+      <div class="stat"><div class="k">Best Bid</div><div class="v" id="s-bid">—</div></div>
+      <div class="stat"><div class="k">Mid</div><div class="v" id="s-mid">—</div></div>
+      <div class="stat"><div class="k">Best Ask</div><div class="v" id="s-ask">—</div></div>
+      <div class="stat"><div class="k">Spread</div><div class="v" id="s-spread">—</div></div>
+      <div class="stat"><div class="k">Resting</div><div class="v" id="s-rest">—</div></div>
+    </div>
+    <div class="grid">
+      <section class="panel">
+        <h2>Order Book</h2>
+        <div class="colhead"><span>Price</span><span>Size</span><span>Orders</span></div>
+        <div class="ladder" id="ladder"></div>
+      </section>
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <section class="panel">
+          <h2>Place an Order</h2>
+          <div class="controls">
+            <div class="seg">
+              <button class="buyb"  id="b-buy"  aria-pressed="true"  type="button">Buy</button>
+              <button class="sellb" id="b-sell" aria-pressed="false" type="button">Sell</button>
+            </div>
+            <div class="seg">
+              <button class="typ" id="t-limit"  aria-pressed="true"  type="button">Limit</button>
+              <button class="typ" id="t-market" aria-pressed="false" type="button">Market</button>
+            </div>
+            <div class="two">
+              <div class="field"><label for="f-price">Price ($)</label>
+                <input id="f-price" type="number" step="0.01" value="100.00" inputmode="decimal"></div>
+              <div class="field"><label for="f-qty">Size</label>
+                <input id="f-qty" type="number" step="1" min="1" value="25" inputmode="numeric"></div>
+            </div>
+            <button class="send" id="f-send" type="button">Buy 25 @ $100.00</button>
+            <div class="minor">
+              <button id="b-random" type="button">+ Random order</button>
+              <button id="b-auto" type="button" aria-pressed="false">▶ Auto market</button>
+              <button id="b-reset" type="button">Reset</button>
+            </div>
+          </div>
+        </section>
+        <section class="panel">
+          <h2>Your Resting Orders</h2>
+          <div class="list" id="myorders"></div>
+        </section>
+        <section class="panel tape">
+          <h2>Trade Tape</h2>
+          <div class="list" id="tape"></div>
+        </section>
+      </div>
+    </div>`;
+  }
+
+  // ---- rendering -----------------------------------------------------------
+  function render() {
+    const snap = JSON.parse(engine.snapshot(DEPTH));
+
+    $("#s-bid").textContent    = snap.bid    == null ? "—" : toDollars(snap.bid);
+    $("#s-ask").textContent    = snap.ask    == null ? "—" : toDollars(snap.ask);
+    $("#s-mid").textContent    = snap.mid    == null ? "—" : toDollars(snap.mid);
+    $("#s-spread").textContent = snap.spread == null ? "—" : toDollars(snap.spread);
+    $("#s-rest").textContent   = snap.resting;
+
+    // largest size across both sides -> depth-bar scale
+    let maxq = 1;
+    for (const l of snap.asks) maxq = Math.max(maxq, l.q);
+    for (const l of snap.bids) maxq = Math.max(maxq, l.q);
+
+    const rowHtml = (l, cls) => {
+      const w = Math.max(4, Math.round((l.q / maxq) * 100));
+      return `<div class="row ${cls}"><div class="bar" style="width:${w}%"></div>` +
+             `<span class="px">${toDollars(l.p)}</span>` +
+             `<span class="qty">${l.q}</span>` +
+             `<span class="cnt">${l.n}</span></div>`;
+    };
+
+    // asks shown worst->best (top to bottom), so the best ask sits by the spread
+    const asksTopDown = snap.asks.slice().reverse();
+    let html = asksTopDown.map((l) => rowHtml(l, "ask")).join("");
+    const sp = (snap.bid != null && snap.ask != null) ? toDollars(snap.ask - snap.bid) : "—";
+    const md = snap.mid == null ? "—" : toDollars(snap.mid);
+    html += `<div class="spreadrow"><span>spread ${sp}</span><span>mid ${md}</span></div>`;
+    html += snap.bids.map((l) => rowHtml(l, "bid")).join("");
+    $("#ladder").innerHTML = html || `<div class="empty">Book is empty — place an order.</div>`;
+
+    // trade tape
+    $("#tape").innerHTML = snap.trades.length
+      ? snap.trades.map((t) => {
+          const c = t.s === 0 ? "b" : "s";
+          const label = t.s === 0 ? "BUY " : "SELL";
+          return `<div class="trade"><span class="side ${c}">${label}</span>` +
+                 `<span>${t.q} @ ${toDollars(t.p)}</span>` +
+                 `<span class="amt">#${t.mk}×#${t.tk}</span></div>`;
+        }).join("")
+      : `<div class="empty">No trades yet.</div>`;
+
+    renderMyOrders();
+  }
+
+  function renderMyOrders() {
+    // drop orders that are no longer resting (filled or cancelled)
+    for (let i = myOrders.length - 1; i >= 0; i--) {
+      if (engine.orderRemaining(myOrders[i].id) < 0) myOrders.splice(i, 1);
+    }
+    const box = $("#myorders");
+    if (!myOrders.length) { box.innerHTML = `<div class="empty">None resting. Orders you place show here.</div>`; return; }
+    box.innerHTML = myOrders.map((o) => {
+      const rem = engine.orderRemaining(o.id);
+      const c = o.side === 0 ? "b" : "s";
+      const label = o.side === 0 ? "BUY" : "SELL";
+      return `<div class="myorder"><span class="lbl ${c}">${label}</span>` +
+             `<span>${rem} @ ${toDollars(o.price)}</span>` +
+             `<button data-id="${o.id}" type="button">Cancel</button></div>`;
+    }).join("");
+    box.querySelectorAll("button[data-id]").forEach((btn) => {
+      btn.addEventListener("click", () => { engine.cancel(Number(btn.dataset.id)); render(); });
+    });
+  }
+
+  // ---- order entry ---------------------------------------------------------
+  function sendLabel() {
+    const price = parseFloat($("#f-price").value || "0");
+    const qty = parseInt($("#f-qty").value || "0", 10);
+    const verb = side === 0 ? "Buy" : "Sell";
+    $("#f-send").textContent = otype === 1
+      ? `${verb} ${qty || 0} at market`
+      : `${verb} ${qty || 0} @ $${(isFinite(price) ? price : 0).toFixed(2)}`;
+    $("#f-send").classList.toggle("sell", side === 1);
+  }
+
+  function placeOrder() {
+    const qty = Math.max(1, parseInt($("#f-qty").value || "0", 10) || 0);
+    const priceTicks = Math.round(parseFloat($("#f-price").value || "0") * 100);
+    const tif = otype === 1 ? 1 : 0; // market -> IOC, limit -> GTC
+    const res = JSON.parse(engine.submit(side, otype, tif, otype === 1 ? 0 : priceTicks, qty));
+    // if any size rested, track it so the user can cancel it
+    if (otype === 0 && res.filled < qty) {
+      myOrders.unshift({ id: res.id, side, type: otype, price: priceTicks, qty });
+    }
+    render();
+  }
+
+  // ---- market simulation ---------------------------------------------------
+  let fair = 10000;
+  function marketTick() {
+    fair += (Math.random() * 6 - 3) | 0;
+    fair -= Math.round((fair - 10000) / 40); // gentle mean reversion
+    const r = Math.random();
+    const s = Math.random() < 0.5 ? 0 : 1;
+    if (r < 0.22) {
+      // marketable order -> creates trades against resting liquidity
+      engine.submit(s, 1, 1, 0, 5 + ((Math.random() * 20) | 0));
+    } else {
+      const off = 1 + ((Math.random() * 6) | 0);
+      const px = s === 0 ? fair - off : fair + off;
+      engine.submit(s, 0, 0, px, 10 + ((Math.random() * 50) | 0));
+    }
+    render();
+  }
+
+  function seed() {
+    // open in a realistic two-sided state instead of an empty book
+    for (let i = 1; i <= 6; i++) {
+      engine.submit(0, 0, 0, 10000 - i * 2, 20 + i * 8); // bids below
+      engine.submit(1, 0, 0, 10000 + i * 2, 20 + i * 8); // asks above
+    }
+  }
+
+  // ---- wiring --------------------------------------------------------------
+  function wire() {
+    $("#b-buy").addEventListener("click", () => {
+      side = 0; $("#b-buy").setAttribute("aria-pressed", "true"); $("#b-sell").setAttribute("aria-pressed", "false"); sendLabel();
+    });
+    $("#b-sell").addEventListener("click", () => {
+      side = 1; $("#b-sell").setAttribute("aria-pressed", "true"); $("#b-buy").setAttribute("aria-pressed", "false"); sendLabel();
+    });
+    $("#t-limit").addEventListener("click", () => {
+      otype = 0; $("#t-limit").setAttribute("aria-pressed", "true"); $("#t-market").setAttribute("aria-pressed", "false");
+      $("#f-price").disabled = false; sendLabel();
+    });
+    $("#t-market").addEventListener("click", () => {
+      otype = 1; $("#t-market").setAttribute("aria-pressed", "true"); $("#t-limit").setAttribute("aria-pressed", "false");
+      $("#f-price").disabled = true; sendLabel();
+    });
+    $("#f-price").addEventListener("input", sendLabel);
+    $("#f-qty").addEventListener("input", sendLabel);
+    $("#f-send").addEventListener("click", placeOrder);
+    $("#b-random").addEventListener("click", marketTick);
+    $("#b-reset").addEventListener("click", () => {
+      engine.reset(); myOrders.length = 0; fair = 10000; seed(); render();
+    });
+    $("#b-auto").addEventListener("click", () => {
+      const btn = $("#b-auto");
+      if (autoTimer) {
+        clearInterval(autoTimer); autoTimer = null;
+        btn.setAttribute("aria-pressed", "false"); btn.textContent = "▶ Auto market";
+      } else {
+        autoTimer = setInterval(marketTick, 650);
+        btn.setAttribute("aria-pressed", "true"); btn.textContent = "⏸ Auto market";
+      }
+    });
+  }
+
+  // ---- boot ----------------------------------------------------------------
+  PulseModule().then((M) => {
+    engine = new M.Engine();
+    $("#app").classList.remove("loading");
+    $("#app").innerHTML = appHtml();
+    wire();
+    seed();
+    sendLabel();
+    render();
+  }).catch((e) => {
+    $("#app").textContent = "Failed to load the engine: " + e;
+  });
+})();
+</script>
+</body>
+</html>
